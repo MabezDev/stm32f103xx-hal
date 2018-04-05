@@ -4,7 +4,7 @@ use cast::u8;
 use stm32f103xx::{I2C1, I2C2};
 
 use gpio::gpiob::{PB6, PB7, PB8, PB9, PB10, PB11};
-use gpio::{Alternate, OpenDrain};
+use gpio::{Output, OpenDrain};
 use hal::blocking::i2c::{Write, WriteRead};
 use rcc::{APB1, Clocks};
 use time::Hertz;
@@ -30,8 +30,8 @@ pub trait Pins<I2C> {
 // I2C1 - no remap
 impl Pins<I2C1>
     for (
-        PB6<Alternate<OpenDrain>>,
-        PB7<Alternate<OpenDrain>>,
+        PB6<Output<OpenDrain>>,
+        PB7<Output<OpenDrain>>,
     ) {
     const REMAP: bool = false;
 }
@@ -39,8 +39,8 @@ impl Pins<I2C1>
 // I2C1 - remaped
 impl Pins<I2C1>
     for (
-        PB8<Alternate<OpenDrain>>,
-        PB9<Alternate<OpenDrain>>,
+        PB8<Output<OpenDrain>>,
+        PB9<Output<OpenDrain>>,
     ) {
     const REMAP: bool = true;
 }
@@ -48,8 +48,8 @@ impl Pins<I2C1>
 // I2C2 - no remap
 impl Pins<I2C2>
     for (
-        PB10<Alternate<OpenDrain>>,
-        PB11<Alternate<OpenDrain>>,
+        PB10<Output<OpenDrain>>,
+        PB11<Output<OpenDrain>>,
     ) {
     const REMAP: bool = false;
 }
@@ -60,25 +60,39 @@ pub struct I2c<I2C, PINS> {
     pins: PINS,
 }
 
-// TODO impl 
-// impl<PINS> I2c<SPI1, PINS> {
-//     pub fn i2c1<F>(
-//         spi: SPI1,
-//         pins: PINS,
-//         mapr: &mut MAPR,
-//         mode: Mode,
-//         freq: F,
-//         clocks: Clocks,
-//         apb: &mut APB2,
-//     ) -> Self
-//     where
-//         F: Into<Hertz>,
-//         PINS: Pins<SPI1>,
-//     {
-//         mapr.mapr().modify(|_, w| w.spi1_remap().bit(PINS::REMAP));
-//         Spi::_spi1(spi, pins, mode, freq.into(), clocks, apb)
-//     }
-// }
+// TODO REMAP
+impl<PINS> I2c<I2C1, PINS> {
+    pub fn i2c1<F>(
+        i2c: I2C1,
+        pins: PINS,
+        freq: F,
+        clocks: Clocks,
+        apb: &mut APB1,
+    ) -> Self
+    where
+        F: Into<Hertz>,
+        PINS: Pins<I2C1>,
+    {
+        // mapr.mapr().modify(|_, w| w.i2c1_remap().bit(PINS::REMAP));
+        I2c::_i2c1(i2c, pins, freq.into(), clocks, apb)
+    }
+}
+
+impl<PINS> I2c<I2C2, PINS> {
+    pub fn i2c2<F>(
+        i2c: I2C2,
+        pins: PINS,
+        freq: F,
+        clocks: Clocks,
+        apb: &mut APB1,
+    ) -> Self
+    where
+        F: Into<Hertz>,
+        PINS: Pins<I2C2>,
+    {
+        I2c::_i2c2(i2c, pins, freq.into(), clocks, apb)
+    }
+}
 
 macro_rules! busy_wait {
     ($i2c:expr, $flag:ident) => {
@@ -103,7 +117,7 @@ macro_rules! hal {
         $(
             impl<PINS> I2c<$I2CX, PINS> {
                 /// Configures the I2C peripheral to work in master mode
-                pub fn $i2cX<F>(
+                fn $i2cX<F>(
                     i2c: $I2CX,
                     pins: PINS,
                     freq: F,
@@ -111,7 +125,7 @@ macro_rules! hal {
                     apb1: &mut APB1,
                 ) -> Self where
                     F: Into<Hertz>,
-                    // PINS: Pins<$I2CX> //TODO impl enforcement on pins
+                    PINS: Pins<$I2CX> //TODO impl enforcement on pins
                 {
                     apb1.enr().modify(|_, w| w.$i2cXen().enabled());
                     apb1.rstr().modify(|_, w| w.$i2cXrst().set_bit());
@@ -134,11 +148,12 @@ macro_rules! hal {
                     };
 
                     const CCR_COEFF: u32 = 2;
-                    const CCR_MASK: u32 = 0x0FFF;
+                    const CCR_MASK: u32 = 0x0FFF; //  & CCR_MASK - doesnt do anything
                     let ccr = if clock_speed <= 100_000 {
                         // I2C_SPEED_STANDARD
                         // I2C_CCR_CALCULATION((__PCLK__), (__SPEED__), 2U) < 4U) ? 4U : I2C_CCR_CALCULATION((__PCLK__), (__SPEED__), 2U)
-                        let ccr_calc =  (i2cclk - 1) / (((clock_speed * CCR_COEFF) + 1) & CCR_MASK);
+                        let ccr_calc: u32 =  (i2cclk - 1) / (((clock_speed * CCR_COEFF) + 1));
+                        let ccr_calc: u32 = ccr_calc;
                         if ccr_calc < 4 {
                             4
                         } else {
@@ -279,6 +294,6 @@ macro_rules! hal {
 }
 
 hal! {
-    I2C1: (i2c1, i2c1en, i2c1rst),
-    I2C2: (i2c2, i2c2en, i2c2rst),
+    I2C1: (_i2c1, i2c1en, i2c1rst),
+    I2C2: (_i2c2, i2c2en, i2c2rst),
 }
