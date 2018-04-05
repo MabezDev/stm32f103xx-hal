@@ -57,7 +57,7 @@ macro_rules! gpio {
             use rcc::APB2;
             use super::{
                 Alternate, Floating, GpioExt, Input,
-                // OpenDrain,
+                OpenDrain,
                 Output,
                 // PullDown, PullUp,
                 PushPull,
@@ -123,27 +123,39 @@ macro_rules! gpio {
                 _mode: PhantomData<MODE>,
             }
 
+
             impl<MODE> OutputPin for $PXx<Output<MODE>> {
-                fn is_high(&self) -> bool {
+                default fn is_high(&self) -> bool {
                     !self.is_low()
                 }
 
-                fn is_low(&self) -> bool {
+                default fn is_low(&self) -> bool {
                     // NOTE(unsafe) atomic read with no side effects
                     unsafe { (*$GPIOX::ptr()).odr.read().bits() & (1 << self.i) == 0 }
                 }
 
-                fn set_high(&mut self) {
+                default fn set_high(&mut self) {
                     // NOTE(unsafe) atomic write to a stateless register
                     unsafe { (*$GPIOX::ptr()).bsrr.write(|w| w.bits(1 << self.i)) }
                 }
 
-                fn set_low(&mut self) {
+                default fn set_low(&mut self) {
                     // NOTE(unsafe) atomic write to a stateless register
                     unsafe { (*$GPIOX::ptr()).bsrr.write(|w| w.bits(1 << (16 + self.i))) }
                 }
             }
 
+            /// In OpenDrain mode writing a high to the output causes
+            /// it to float. Therefore whether the pin is high or low
+            /// depends on other periphery connected to that pin. Therefore
+            /// one needs to read from IDR instead from ODR in this mode.
+            impl OutputPin for $PXx<Output<OpenDrain>> {
+                fn is_low(&self) -> bool {
+                    // NOTE(unsafe) atomic read with no side effects
+                    unsafe { (*$GPIOX::ptr()).idr.read().bits() & (1 << self.i) == 0 }
+                }
+            }
+          
             impl<MODE> $PXx<Output<MODE>> {
                 /// Toggles the output of the pin
                 pub fn toggle(&mut self) {
@@ -248,27 +260,29 @@ macro_rules! gpio {
                     //     $PXi { _mode: PhantomData }
                     // }
 
-                    // /// Configures the pin to operate as an open drain output pin
-                    // pub fn into_open_drain_output(
-                    //     self,
-                    //     moder: &mut MODER,
-                    //     otyper: &mut OTYPER,
-                    // ) -> $PXi<Output<OpenDrain>> {
-                    //     let offset = 2 * $i;
+                    /// Configures the pin to operate as an open drain output pin
+                    /// The Output implementation for [Output#is_low(&self)] and
+                    /// [Output#is_high(&self)] read from the IDR instead from the ODR
+                    /// since a written high does not need to mean the pin is actually high
+                    pub fn into_open_drain_output(
+                        self,
+                        cr: &mut $CR,
+                    ) -> $PXi<Output<OpenDrain>> {
+                        let offset = (4 * $i) % 32;
+                        // General purpose output open-drain
+                        let cnf = 0b01;
+                        // Open-Drain Output mode, max speed 50 MHz
+                        let mode = 0b11;
+                        let bits = (cnf << 2) | mode;
 
-                    //     // general purpose output mode
-                    //     let mode = 0b01;
-                    //     moder.moder().modify(|r, w| unsafe {
-                    //         w.bits((r.bits() & !(0b11 << offset)) | (mode << offset))
-                    //     });
+                        cr
+                            .cr()
+                            .modify(|r, w| unsafe {
+                                w.bits((r.bits() & !(0b1111 << offset)) | (bits << offset))
+                            });
 
-                    //     // open drain output
-                    //     otyper
-                    //         .otyper()
-                    //         .modify(|r, w| unsafe { w.bits(r.bits() | (0b1 << $i)) });
-
-                    //     $PXi { _mode: PhantomData }
-                    // }
+                        $PXi { _mode: PhantomData }
+                    }
 
                     /// Configures the pin to operate as an push pull output pin
                     pub fn into_push_pull_output(
@@ -306,23 +320,34 @@ macro_rules! gpio {
                 }
 
                 impl<MODE> OutputPin for $PXi<Output<MODE>> {
-                    fn is_high(&self) -> bool {
+                    default fn is_high(&self) -> bool {
                         !self.is_low()
                     }
 
-                    fn is_low(&self) -> bool {
+                    default fn is_low(&self) -> bool {
                         // NOTE(unsafe) atomic read with no side effects
                         unsafe { (*$GPIOX::ptr()).odr.read().bits() & (1 << $i) == 0 }
                     }
 
-                    fn set_high(&mut self) {
+                    default fn set_high(&mut self) {
                         // NOTE(unsafe) atomic write to a stateless register
                         unsafe { (*$GPIOX::ptr()).bsrr.write(|w| w.bits(1 << $i)) }
                     }
 
-                    fn set_low(&mut self) {
+                    default fn set_low(&mut self) {
                         // NOTE(unsafe) atomic write to a stateless register
                         unsafe { (*$GPIOX::ptr()).bsrr.write(|w| w.bits(1 << (16 + $i))) }
+                    }
+                }
+
+                /// In OpenDrain mode writing a high to the output causes
+                /// it to float. Therefore whether the pin is high or low
+                /// depends on other periphery connected to that pin. Therefore
+                /// one needs to read from IDR instead from ODR in this mode.
+                impl OutputPin for $PXi<Output<OpenDrain>> {
+                    fn is_low(&self) -> bool {
+                        // NOTE(unsafe) atomic read with no side effects
+                        unsafe { (*$GPIOX::ptr()).idr.read().bits() & (1 << $i) == 0 }
                     }
                 }
 
