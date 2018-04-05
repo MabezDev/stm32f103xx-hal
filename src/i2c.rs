@@ -23,30 +23,62 @@ pub enum Error {
     #[doc(hidden)] _Extensible,
 }
 
-// FIXME these should be "closed" traits
-/// SCL pin -- DO NOT IMPLEMENT THIS TRAIT
-pub trait SclPin<I2C> {}
+pub trait Pins<I2C> {
+    const REMAP: bool;
+}
 
-/// SDA pin -- DO NOT IMPLEMENT THIS TRAIT
-pub trait SdaPin<I2C> {}
+// I2C1 - no remap
+impl Pins<I2C1>
+    for (
+        PB6<Alternate<OpenDrain>>,
+        PB7<Alternate<OpenDrain>>,
+    ) {
+    const REMAP: bool = false;
+}
 
-// unsafe impl SclPin<I2C1> for PA15<AF4> {}
-impl SclPin<I2C1> for PB6<Alternate<OpenDrain>> {}
-impl SclPin<I2C1> for PB8<Alternate<OpenDrain>> {}
+// I2C1 - remaped
+impl Pins<I2C1>
+    for (
+        PB8<Alternate<OpenDrain>>,
+        PB9<Alternate<OpenDrain>>,
+    ) {
+    const REMAP: bool = true;
+}
 
-impl SclPin<I2C2> for PB10<Alternate<OpenDrain>> {}
-
-// unsafe impl SdaPin<I2C1> for PA14<AF4> {}
-impl SdaPin<I2C1> for PB7<Alternate<OpenDrain>> {}
-impl SdaPin<I2C1> for PB9<Alternate<OpenDrain>> {}
-
-impl SdaPin<I2C2> for PB11<Alternate<OpenDrain>> {}
+// I2C2 - no remap
+impl Pins<I2C2>
+    for (
+        PB10<Alternate<OpenDrain>>,
+        PB11<Alternate<OpenDrain>>,
+    ) {
+    const REMAP: bool = false;
+}
 
 /// I2C peripheral operating in master mode
 pub struct I2c<I2C, PINS> {
     i2c: I2C,
     pins: PINS,
 }
+
+// TODO impl 
+// impl<PINS> I2c<SPI1, PINS> {
+//     pub fn i2c1<F>(
+//         spi: SPI1,
+//         pins: PINS,
+//         mapr: &mut MAPR,
+//         mode: Mode,
+//         freq: F,
+//         clocks: Clocks,
+//         apb: &mut APB2,
+//     ) -> Self
+//     where
+//         F: Into<Hertz>,
+//         PINS: Pins<SPI1>,
+//     {
+//         mapr.mapr().modify(|_, w| w.spi1_remap().bit(PINS::REMAP));
+//         Spi::_spi1(spi, pins, mode, freq.into(), clocks, apb)
+//     }
+// }
 
 macro_rules! busy_wait {
     ($i2c:expr, $flag:ident) => {
@@ -69,18 +101,17 @@ macro_rules! busy_wait {
 macro_rules! hal {
     ($($I2CX:ident: ($i2cX:ident, $i2cXen:ident, $i2cXrst:ident),)+) => {
         $(
-            impl<SCL, SDA> I2c<$I2CX, (SCL, SDA)> {
+            impl<PINS> I2c<$I2CX, PINS> {
                 /// Configures the I2C peripheral to work in master mode
                 pub fn $i2cX<F>(
                     i2c: $I2CX,
-                    pins: (SCL, SDA),
+                    pins: PINS,
                     freq: F,
                     clocks: Clocks,
                     apb1: &mut APB1,
                 ) -> Self where
                     F: Into<Hertz>,
-                    SCL: SclPin<$I2CX>,
-                    SDA: SdaPin<$I2CX>,
+                    // PINS: Pins<$I2CX> //TODO impl enforcement on pins
                 {
                     apb1.enr().modify(|_, w| w.$i2cXen().enabled());
                     apb1.rstr().modify(|_, w| w.$i2cXrst().set_bit());
@@ -138,7 +169,7 @@ macro_rules! hal {
                 }
 
                 /// Releases the I2C peripheral and associated pins
-                pub fn free(self) -> ($I2CX, (SCL, SDA)) {
+                pub fn free(self) -> ($I2CX, PINS) {
                     (self.i2c, self.pins)
                 }
             }
